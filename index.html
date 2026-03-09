@@ -224,21 +224,21 @@
       Difficulty comes from forced dependencies — you can't match A until you've
       cleared B. Use Append when stuck.
     </p>
-    <button class="var-btn" data-reps="2">
+    <button class="var-btn" data-rows="3">
       <span class="vt">Intro</span>
-      <span class="vd">1–9 × 2 · 18 cells · learn the rules</span>
+      <span class="vd">3 rows · 24 cells · learn the rules</span>
     </button>
-    <button class="var-btn" data-reps="4">
+    <button class="var-btn" data-rows="5">
       <span class="vt">Standard</span>
-      <span class="vd">1–9 × 4 · 36 cells · the real game</span>
+      <span class="vd">5 rows · 40 cells · the real game</span>
     </button>
-    <button class="var-btn" data-reps="6">
+    <button class="var-btn" data-rows="7">
       <span class="vt">Hard</span>
-      <span class="vd">1–9 × 6 · 54 cells · deep planning required</span>
+      <span class="vd">7 rows · 56 cells · deep planning required</span>
     </button>
-    <button class="var-btn" data-reps="8">
+    <button class="var-btn" data-rows="9">
       <span class="vt">Expert</span>
-      <span class="vd">1–9 × 8 · 72 cells · serious challenge</span>
+      <span class="vd">9 rows · 72 cells · serious challenge</span>
     </button>
   </div>
 </div>
@@ -263,11 +263,10 @@
 const CLASSIC_COLS = 8;
 const BASE_SEQ = [1,2,3,4,5,6,7,8,9];
 
-// Build the classic board by repeating the 1-9 base sequence `reps` times.
-function classicBoard(reps) {
-  const vals = [];
-  for (let i = 0; i < reps; i++) vals.push(...BASE_SEQ);
-  return vals;
+// Build a board of `rows` complete rows, cycling through the 1-9 sequence.
+function classicBoard(rows) {
+  const cells = rows * CLASSIC_COLS;
+  return Array.from({length: cells}, (_, i) => BASE_SEQ[i % BASE_SEQ.length]);
 }
 
 
@@ -680,9 +679,9 @@ document.getElementById('btn-new').addEventListener('click', openNewGame);
 
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    const reps = parseInt(btn.dataset.reps, 10);
+    const rows = parseInt(btn.dataset.rows, 10);
     closeNewGame();
-    startGame(classicBoard(reps), CLASSIC_COLS);
+    startGame(classicBoard(rows), CLASSIC_COLS);
   });
 });
 
