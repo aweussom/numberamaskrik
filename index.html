@@ -320,7 +320,7 @@ function tryBoard(vals,cols){
       const pairs=samplePairs(b,cols,6);
       if(!pairs.length){
         if(appends>=4) break;
-        const live=b.filter(v=>v); b=[...b,...live]; active=live.length; appends++;
+        const live=b.filter(v=>v); b=[...b,...live]; active=live.length*2; appends++;
       } else {
         const [x,y]=pairs[Math.trunc(Math.random()*pairs.length)];
         b=b.slice(); b[x]=0; b[y]=0; active-=2;
