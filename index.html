@@ -205,6 +205,10 @@
       full path-replay proof — a complete solution is guaranteed before the board
       is shown. All sizes use even rows × even columns.
     </p>
+    <button class="var-btn" data-mode="classic">
+      <span class="vt">Classic</span>
+      <span class="vd">Fixed sequence 1–9 × 2 rows · the original Numberama starting board</span>
+    </button>
     <button class="var-btn" data-mode="2x8">
       <span class="vt">Mini</span>
       <span class="vd">2 rows × 8 columns · 16 cells</span>
@@ -249,7 +253,10 @@
 // SHARED GAME LOGIC  (also stringified into the solver worker)
 // ═══════════════════════════════════════════════════════════
 
-// Pre-defined board sizes — all even×even so rows, cols, and n are all even.
+const CLASSIC_VALS = [1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9];
+const CLASSIC_COLS = 9;
+
+
 const BOARD_SIZES = [
   { rows: 2, cols:  8, label: 'Mini',   cells: 16 },
   { rows: 4, cols:  8, label: 'Easy',   cells: 32 },
@@ -711,7 +718,15 @@ document.getElementById('btn-new').addEventListener('click', openNewGame);
 
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
-    const [rows, cols] = btn.dataset.mode.split('x').map(Number);
+    const mode = btn.dataset.mode;
+
+    if (mode === 'classic') {
+      closeNewGame();
+      startGame(CLASSIC_VALS, CLASSIC_COLS);
+      return;
+    }
+
+    const [rows, cols] = mode.split('x').map(Number);
 
     // Lock UI, show progress
     document.querySelectorAll('.var-btn').forEach(b => { b.disabled = true; });
