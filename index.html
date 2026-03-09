@@ -510,9 +510,51 @@ function doUndo() {
 function doAppend() {
   snapshot();
   const active = G.cells.filter(v => v !== 0);
-  G.cells = [...G.cells, ...active];
+  const base = G.cells.slice();
+
+  // Try standard append first
+  let result = [...base, ...active];
+  if (!quickSolve(result, G.width)) {
+    // Shuffle the appended portion until solvable (up to 60 attempts)
+    for (let i = 0; i < 60; i++) {
+      const shuffled = active.slice();
+      for (let j = shuffled.length - 1; j > 0; j--) {
+        const k = Math.trunc(Math.random() * (j + 1));
+        const t = shuffled[j]; shuffled[j] = shuffled[k]; shuffled[k] = t;
+      }
+      const candidate = [...base, ...shuffled];
+      if (quickSolve(candidate, G.width)) { result = candidate; break; }
+    }
+  }
+
+  G.cells = result;
   G.appendCount++;
   render(); updateStats();
+}
+
+// Fast greedy-random solver for the main thread.
+// Returns true if at least 1 of `attempts` random playthroughs clears the board.
+function quickSolve(cells, width, attempts = 30) {
+  for (let a = 0; a < attempts; a++) {
+    const b = cells.slice();
+    let appends = 0;
+    for (let s = 0; s < 800; s++) {
+      let active = 0;
+      for (let k = 0; k < b.length; k++) if (b[k]) active++;
+      if (active === 0) return true;
+      const pairs = findPairs(b, width);
+      if (!pairs.length) {
+        if (appends >= 2) break;
+        const live = b.filter(v => v);
+        for (let k = 0; k < live.length; k++) b.push(live[k]);
+        appends++;
+      } else {
+        const [x, y] = pairs[Math.trunc(Math.random() * pairs.length)];
+        b[x] = 0; b[y] = 0;
+      }
+    }
+  }
+  return false;
 }
 
 function tryMatch(a, b) {
