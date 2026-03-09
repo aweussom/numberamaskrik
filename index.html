@@ -220,38 +220,26 @@
   <div class="modal">
     <h2>New Game</h2>
     <p class="sub">
-      Every board is generated with a snake-path construction and verified with a
-      full path-replay proof — a complete solution is guaranteed before the board
-      is shown. All sizes use even rows × even columns.
+      All boards use the classic 1–9 sequence repeated at increasing scale.
+      Difficulty comes from forced dependencies — you can't match A until you've
+      cleared B. Use Append when stuck.
     </p>
-    <button class="var-btn" data-mode="classic">
-      <span class="vt">Classic</span>
-      <span class="vd">Fixed sequence 1–9 × 2, displayed 6-wide · use Append when stuck</span>
+    <button class="var-btn" data-reps="2">
+      <span class="vt">Intro</span>
+      <span class="vd">1–9 × 2 · 18 cells · learn the rules</span>
     </button>
-    <button class="var-btn" data-mode="2x8">
-      <span class="vt">Mini</span>
-      <span class="vd">2 rows × 8 columns · 16 cells</span>
+    <button class="var-btn" data-reps="4">
+      <span class="vt">Standard</span>
+      <span class="vd">1–9 × 4 · 36 cells · the real game</span>
     </button>
-    <button class="var-btn" data-mode="4x8">
-      <span class="vt">Easy</span>
-      <span class="vd">4 rows × 8 columns · 32 cells</span>
-    </button>
-    <button class="var-btn" data-mode="4x10">
-      <span class="vt">Normal</span>
-      <span class="vd">4 rows × 10 columns · 40 cells</span>
-    </button>
-    <button class="var-btn" data-mode="6x10">
+    <button class="var-btn" data-reps="6">
       <span class="vt">Hard</span>
-      <span class="vd">6 rows × 10 columns · 60 cells</span>
+      <span class="vd">1–9 × 6 · 54 cells · deep planning required</span>
     </button>
-    <button class="var-btn" data-mode="8x10">
+    <button class="var-btn" data-reps="8">
       <span class="vt">Expert</span>
-      <span class="vd">8 rows × 10 columns · 80 cells</span>
+      <span class="vd">1–9 × 8 · 72 cells · serious challenge</span>
     </button>
-    <div id="gen-status">
-      🔍 Generating board…
-      <div id="gen-attempt"></div>
-    </div>
   </div>
 </div>
 
@@ -272,8 +260,15 @@
 // SHARED GAME LOGIC  (also stringified into the solver worker)
 // ═══════════════════════════════════════════════════════════
 
-const CLASSIC_VALS = [1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9];
-const CLASSIC_COLS = 6;  // 3 rows × 6 cols — breaks trivial column-match, requires real strategy
+const CLASSIC_COLS = 6;
+const BASE_SEQ = [1,2,3,4,5,6,7,8,9];
+
+// Build the classic board by repeating the 1-9 base sequence `reps` times.
+function classicBoard(reps) {
+  const vals = [];
+  for (let i = 0; i < reps; i++) vals.push(...BASE_SEQ);
+  return vals;
+}
 
 
 const BOARD_SIZES = [
@@ -337,131 +332,6 @@ function hasMoves(cells, width) {
     }
   }
   return false;
-}
-
-// ═══════════════════════════════════════════════════════════
-// INLINE SOLVER WEB WORKER
-// ═══════════════════════════════════════════════════════════
-
-// Constructive board generation using a snake-path Hamiltonian approach.
-//
-// Key insight: walk all cells in a "snake" pattern (boustrophedon), then pair up
-// consecutive cells along the path.  Every consecutive pair on the snake is a
-// DIRECT neighbor in the grid (horizontal, row-wrap, or same-column adjacent-row),
-// so isAdjacent always returns true for them regardless of what other cells are
-// placed — no stuck states, no retries needed.
-//
-// We randomly choose between a row-snake and a column-snake for positional variety,
-// shuffle the placement ORDER of pairs, and assign random valid pair values, giving
-// an enormous space of distinct boards.  A path-replay sanity check confirms the
-// complete solution in O(n²) time.
-function generateByConstruction(rows, cols) {
-  const n = rows * cols;
-  const PAIR_VALUES = [
-    [1,9],[9,1],[2,8],[8,2],[3,7],[7,3],[4,6],[6,4],[5,5],
-    [1,1],[2,2],[3,3],[4,4],[6,6],[7,7],[8,8],[9,9],
-  ];
-
-  // Build a Hamiltonian snake path through the grid.
-  // Randomly choose row-snake vs column-snake and starting direction.
-  const snake = [];
-  if (Math.random() < 0.5) {
-    // Row-snake: traverse rows, alternating left↔right.
-    const startLeft = Math.random() < 0.5;
-    for (let row = 0; row < rows; row++) {
-      const goLeft = (row % 2 === 0) === startLeft;
-      if (goLeft) {
-        for (let col = 0; col < cols; col++) snake.push(row * cols + col);
-      } else {
-        for (let col = cols - 1; col >= 0; col--) snake.push(row * cols + col);
-      }
-    }
-  } else {
-    // Column-snake: traverse columns, alternating top↔bottom.
-    const startDown = Math.random() < 0.5;
-    for (let col = 0; col < cols; col++) {
-      const goDown = (col % 2 === 0) === startDown;
-      if (goDown) {
-        for (let row = 0; row < rows; row++) snake.push(row * cols + col);
-      } else {
-        for (let row = rows - 1; row >= 0; row--) snake.push(row * cols + col);
-      }
-    }
-  }
-
-  // Group consecutive snake cells into pairs.
-  // Each pair is guaranteed to be a direct neighbor (always isAdjacent = true).
-  const pairs = [];
-  for (let k = 0; k < n; k += 2) pairs.push([snake[k], snake[k + 1]]);
-
-  // Shuffle pair placement order for board variety.
-  for (let i = pairs.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    const tmp = pairs[i]; pairs[i] = pairs[j]; pairs[j] = tmp;
-  }
-
-  // Assign random valid values to each pair and record the construction path.
-  const cells = new Array(n).fill(0);
-  const path  = [];
-  for (const [pi, pj] of pairs) {
-    const [va, vb] = PAIR_VALUES[(Math.random() * PAIR_VALUES.length) | 0];
-    path.push([pi, pj]);
-    cells[pi] = va;
-    cells[pj] = vb;
-  }
-
-  // Path-replay sanity check: remove in reverse construction order.
-  // For direct-neighbor pairs this always passes — included as a safety net.
-  const ver = cells.slice();
-  for (let k = path.length - 1; k >= 0; k--) {
-    const [pi, pj] = path[k];
-    if (!isAdjacent(ver, cols, pi, pj) || !isValidPair(ver[pi], ver[pj])) return null;
-    ver[pi] = 0; ver[pj] = 0;
-  }
-  return cells;
-}
-
-function buildWorker() {
-  // Embed the shared pure functions by source so the worker is fully self-contained.
-  const src = [isValidPair, isAdjacent, generateByConstruction]
-    .map(fn => fn.toString()).join('\n\n');
-
-  const code = `
-'use strict';
-${src}
-
-self.onmessage = function(e) {
-  const { rows, cols } = e.data;
-  // Construction + path-replay verification is O(n³) and nearly instant.
-  const vals = generateByConstruction(rows, cols);
-  if (vals) self.postMessage({ type: 'found', vals });
-  else      self.postMessage({ type: 'failed' });
-};
-`;
-  const blob = new Blob([code], { type: 'text/javascript' });
-  return new Worker(URL.createObjectURL(blob));
-}
-
-let activeWorker = null;
-
-function generateRandom(rows, cols, onProgress) {
-  return new Promise((resolve, reject) => {
-    if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
-    activeWorker = buildWorker();
-
-    onProgress(1); // show the "generating" message immediately
-    activeWorker.onmessage = e => {
-      const { type, vals } = e.data;
-      activeWorker.terminate(); activeWorker = null;
-      if (type === 'found') resolve(vals);
-      else reject(new Error('Board generation failed. Please try again.'));
-    };
-    activeWorker.onerror = err => {
-      activeWorker.terminate(); activeWorker = null;
-      reject(err);
-    };
-    activeWorker.postMessage({ rows, cols });
-  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -798,14 +668,10 @@ function flashBad(...indices) {
 // NEW-GAME MODAL
 // ═══════════════════════════════════════════════════════════
 
-const ngOverlay  = document.getElementById('ng-overlay');
-const genStatus  = document.getElementById('gen-status');
-const genAttempt = document.getElementById('gen-attempt');
+const ngOverlay = document.getElementById('ng-overlay');
 
 function openNewGame() {
   ngOverlay.classList.add('open');
-  genStatus.style.display = 'none';
-  genAttempt.textContent  = '';
   document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
 }
 function closeNewGame() { ngOverlay.classList.remove('open'); }
@@ -813,33 +679,10 @@ function closeNewGame() { ngOverlay.classList.remove('open'); }
 document.getElementById('btn-new').addEventListener('click', openNewGame);
 
 document.querySelectorAll('.var-btn').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const mode = btn.dataset.mode;
-
-    if (mode === 'classic') {
-      closeNewGame();
-      startGame(CLASSIC_VALS, CLASSIC_COLS);
-      return;
-    }
-
-    const [rows, cols] = mode.split('x').map(Number);
-
-    // Lock UI, show progress
-    document.querySelectorAll('.var-btn').forEach(b => { b.disabled = true; });
-    genStatus.style.display = 'block';
-    genAttempt.textContent  = '';
-
-    try {
-      const vals = await generateRandom(rows, cols, att => {
-        genAttempt.textContent = `Attempt ${att}…`;
-      });
-      closeNewGame();
-      startGame(vals, cols);
-    } catch (err) {
-      alert('Could not generate a board. Please try again.');
-      document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
-      genStatus.style.display = 'none';
-    }
+  btn.addEventListener('click', () => {
+    const reps = parseInt(btn.dataset.reps, 10);
+    closeNewGame();
+    startGame(classicBoard(reps), CLASSIC_COLS);
   });
 });
 
