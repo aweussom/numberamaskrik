@@ -171,6 +171,23 @@
     #win-box p  { color: #aaa; margin: 4px 0; }
 
     .hint { font-size: 0.75rem; color: #334; margin-top: 12px; text-align: center; }
+
+    /* ── Easy mode ── */
+    .btn.easy-on { background: #1a3a50; border-color: #64dcff; color: #64dcff; }
+
+    .cell.pulse-hint {
+      animation: pulse-hint 1.1s ease-in-out infinite;
+      border-color: #64dcff !important;
+    }
+    @keyframes pulse-hint {
+      0%,100% { box-shadow: 0 0 4px 0 rgba(100,220,255,0.3); }
+      50%      { box-shadow: 0 0 14px 4px rgba(100,220,255,0.7); background: #1e3a50; }
+    }
+
+    #hint-svg {
+      position: absolute; top: 0; left: 0;
+      pointer-events: none; overflow: visible;
+    }
   </style>
 </head>
 <body>
@@ -188,10 +205,12 @@
   <button class="btn"     id="btn-new">New Game</button>
   <button class="btn dim" id="btn-append">Append</button>
   <button class="btn dim" id="btn-undo">Undo</button>
+  <button class="btn dim" id="btn-easy">Easy Mode</button>
 </div>
 
-<div id="board-wrap">
+<div id="board-wrap" style="position:relative">
   <div id="board"></div>
+  <svg id="hint-svg"></svg>
 </div>
 
 <p class="hint">Drag (or click twice) pairs that are equal or sum to 10</p>
@@ -522,6 +541,7 @@ function tryMatch(a, b) {
     delete G.animSet[a];
     delete G.animSet[b];
     render();
+    resetIdleTimer();
     if (G.cells.every(v => v === 0)) showWin();
   }, 340);
   G.animTimeouts.add(tid);
@@ -534,6 +554,74 @@ function tryMatch(a, b) {
 // ═══════════════════════════════════════════════════════════
 
 const UI = { selected: -1, dragging: false, dragSrc: -1, dragTgt: -1 };
+
+// ── Easy mode ──────────────────────────────────────────────
+let easyMode    = false;
+let hintActive  = false;   // idle hint currently showing
+let idleTimerId = null;
+
+function resetIdleTimer() {
+  if (idleTimerId) { clearTimeout(idleTimerId); idleTimerId = null; }
+  if (hintActive)  { hintActive = false; render(); }
+  if (easyMode && G.cells.some(v => v !== 0)) {
+    idleTimerId = setTimeout(() => { hintActive = true; render(); }, 4000);
+  }
+}
+
+// Draw transparent dashed lines from the selected cell to every valid match.
+// Also used to draw ALL valid pair lines when the idle hint is active.
+const hintSvg = document.getElementById('hint-svg');
+
+function updateHintLines() {
+  hintSvg.innerHTML = '';
+  if (!easyMode) return;
+
+  const wrapEl  = document.getElementById('board-wrap');
+  const wrapRect = wrapEl.getBoundingClientRect();
+  hintSvg.setAttribute('width',  wrapEl.offsetWidth);
+  hintSvg.setAttribute('height', wrapEl.offsetHeight);
+
+  function cellCenter(idx) {
+    const el = boardEl.querySelector(`[data-idx="${idx}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - wrapRect.left,
+             y: r.top  + r.height / 2 - wrapRect.top };
+  }
+
+  function drawLine(x1, y1, x2, y2, color, width, dash) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', width);
+    line.setAttribute('stroke-linecap', 'round');
+    if (dash) line.setAttribute('stroke-dasharray', dash);
+    hintSvg.appendChild(line);
+  }
+
+  if (UI.selected !== -1 && G.cells[UI.selected]) {
+    // Show all valid matches for the selected cell
+    const src = cellCenter(UI.selected);
+    if (!src) return;
+    for (let j = 0; j < G.cells.length; j++) {
+      if (j === UI.selected || !G.cells[j]) continue;
+      if (!isValidPair(G.cells[UI.selected], G.cells[j])) continue;
+      if (!isAdjacent(G.cells, G.width, UI.selected, j)) continue;
+      const tgt = cellCenter(j);
+      if (!tgt) continue;
+      drawLine(src.x, src.y, tgt.x, tgt.y, 'rgba(100,220,255,0.55)', 2.5, '6 4');
+    }
+  } else if (hintActive) {
+    // Idle hint: draw lines for every valid pair, subtler
+    const pairs = findPairs(G.cells, G.width);
+    for (const [a, b] of pairs) {
+      const ca = cellCenter(a), cb = cellCenter(b);
+      if (!ca || !cb) continue;
+      drawLine(ca.x, ca.y, cb.x, cb.y, 'rgba(100,220,255,0.25)', 1.5, '5 5');
+    }
+  }
+}
 
 const boardEl = document.getElementById('board');
 
@@ -586,6 +674,11 @@ function render() {
       } else {
         if (i === UI.selected) cls += ' selected';
       }
+      // Easy-mode idle hint: pulse first cell of first valid pair
+      if (easyMode && hintActive && !UI.dragging && UI.selected === -1) {
+        const hint = findPairs(cells, width);
+        if (hint.length && i === hint[0][0]) cls += ' pulse-hint';
+      }
       div.className = cls;
     }
   }
@@ -594,6 +687,8 @@ function render() {
   const movesLeft = hasMoves(cells, width);
   document.getElementById('btn-append').disabled = movesLeft;
   document.getElementById('btn-undo').disabled   = G.history.length === 0;
+
+  updateHintLines();
 }
 
 function updateStats() {
@@ -608,6 +703,7 @@ function updateStats() {
 
 function onDown(e, idx) {
   e.preventDefault();
+  resetIdleTimer();
   if (!G.cells[idx]) return;
   UI.dragging = true;
   UI.dragSrc  = idx;
@@ -767,9 +863,20 @@ document.getElementById('btn-win-new').addEventListener('click', () => {
 // ═══════════════════════════════════════════════════════════
 
 document.getElementById('btn-append').addEventListener('click', () => {
-  if (!hasMoves(G.cells, G.width)) doAppend();
+  if (!hasMoves(G.cells, G.width)) { doAppend(); resetIdleTimer(); }
 });
-document.getElementById('btn-undo').addEventListener('click', doUndo);
+document.getElementById('btn-undo').addEventListener('click', () => { doUndo(); resetIdleTimer(); });
+
+document.getElementById('btn-easy').addEventListener('click', () => {
+  easyMode = !easyMode;
+  const btn = document.getElementById('btn-easy');
+  btn.classList.toggle('easy-on', easyMode);
+  btn.textContent = easyMode ? 'Easy Mode ✓' : 'Easy Mode';
+  hintActive = false;
+  if (easyMode) resetIdleTimer();
+  else { if (idleTimerId) { clearTimeout(idleTimerId); idleTimerId = null; } }
+  render();
+});
 
 // ═══════════════════════════════════════════════════════════
 // BOOT
