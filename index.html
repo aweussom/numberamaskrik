@@ -142,7 +142,7 @@
 
     .var-btn {
       display: block; width: 100%; margin: 7px 0;
-      padding: 13px 16px; text-align: left;
+      padding: 13px 16px; text-align: left; position: relative;
       border: 2px solid #253558; background: #1a2845;
       color: #b0c4e8; border-radius: 10px; cursor: pointer;
       transition: border-color .15s, background .15s;
@@ -152,6 +152,7 @@
     .var-btn .vt { font-weight: 700; font-size: 0.97rem; display: block; }
     .var-btn .vd { font-size: 0.76rem; color: #556; margin-top: 2px; display: block; }
     .var-btn:hover:not(:disabled) .vd { color: #998; }
+    .pool-badge { position: absolute; top: 10px; right: 12px; font-size: 1rem; font-weight: bold; }
 
     #gen-status { margin-top: 16px; color: #aaa; font-size: 0.88rem; display: none; }
     #gen-attempt { font-size: 0.75rem; color: #556; margin-top: 4px; }
@@ -220,25 +221,28 @@
   <div class="modal">
     <h2>New Game</h2>
     <p class="sub">
-      All boards use the classic 1–9 sequence repeated at increasing scale.
-      Difficulty comes from forced dependencies — you can't match A until you've
-      cleared B. Use Append when stuck.
+      Random boards, verified solvable. New boards are prepared in the background
+      while you play. Use Append when stuck.
     </p>
-    <button class="var-btn" data-rows="3">
+    <button class="var-btn" data-level="intro">
       <span class="vt">Intro</span>
       <span class="vd">3 rows · 24 cells · learn the rules</span>
+      <span class="pool-badge">…</span>
     </button>
-    <button class="var-btn" data-rows="5">
+    <button class="var-btn" data-level="standard">
       <span class="vt">Standard</span>
-      <span class="vd">5 rows · 40 cells · the real game</span>
+      <span class="vd">6 rows · 48 cells · the real game</span>
+      <span class="pool-badge">…</span>
     </button>
-    <button class="var-btn" data-rows="7">
+    <button class="var-btn" data-level="hard">
       <span class="vt">Hard</span>
-      <span class="vd">7 rows · 56 cells · deep planning required</span>
+      <span class="vd">9 rows · 72 cells · deep planning required</span>
+      <span class="pool-badge">…</span>
     </button>
-    <button class="var-btn" data-rows="9">
+    <button class="var-btn" data-level="expert">
       <span class="vt">Expert</span>
-      <span class="vd">9 rows · 72 cells · serious challenge</span>
+      <span class="vd">12 rows · 96 cells · serious challenge</span>
+      <span class="pool-badge">…</span>
     </button>
   </div>
 </div>
@@ -260,23 +264,118 @@
 // SHARED GAME LOGIC  (also stringified into the solver worker)
 // ═══════════════════════════════════════════════════════════
 
-const CLASSIC_COLS = 8;
-const BASE_SEQ = [1,2,3,4,5,6,7,8,9];
+const COLS = 8;
 
-// Build a board of `rows` complete rows, cycling through the 1-9 sequence.
-function classicBoard(rows) {
-  const cells = rows * CLASSIC_COLS;
-  return Array.from({length: cells}, (_, i) => BASE_SEQ[i % BASE_SEQ.length]);
+// ── Difficulty levels ─────────────────────────────────────────────────────
+const LEVELS = [
+  { id: 'intro',    rows:  3, label: 'Intro',    desc: '3 rows · 24 cells · learn the rules' },
+  { id: 'standard', rows:  6, label: 'Standard', desc: '6 rows · 48 cells · the real game' },
+  { id: 'hard',     rows:  9, label: 'Hard',     desc: '9 rows · 72 cells · deep planning required' },
+  { id: 'expert',   rows: 12, label: 'Expert',   desc: '12 rows · 96 cells · serious challenge' },
+];
+
+// ── Board pool ────────────────────────────────────────────────────────────
+const POOL_TARGET = 4;
+const boardPool = {};
+LEVELS.forEach(l => { boardPool[l.id] = []; });
+
+// ── Worker (greedy-random solver, runs continuously in background) ────────
+const WORKER_SRC = `
+'use strict';
+function isValidPair(a,b){ return a===b||a+b===10; }
+function isAdjacent(cells,w,i,j){
+  if(i===j) return false;
+  const lo=Math.min(i,j), hi=Math.max(i,j);
+  let ok=true;
+  for(let k=lo+1;k<hi;k++) if(cells[k]){ok=false;break;}
+  if(ok) return true;
+  if(i%w===j%w){
+    const col=i%w, rLo=Math.floor(lo/w), rHi=Math.floor(hi/w);
+    for(let r=rLo+1;r<rHi;r++) if(cells[r*w+col]) return false;
+    return true;
+  }
+  return false;
+}
+// Returns up to maxN pairs — stops early so O(n) not O(n²) for large boards.
+function samplePairs(cells,w,maxN){
+  const p=[];
+  for(let i=0;i<cells.length&&p.length<maxN;i++){
+    if(!cells[i]) continue;
+    for(let j=i+1;j<cells.length;j++){
+      if(!cells[j]) continue;
+      if(isValidPair(cells[i],cells[j])&&isAdjacent(cells,w,i,j)){
+        p.push([i,j]); break; // one per i is plenty for random diversity
+      }
+    }
+  }
+  return p;
+}
+function tryBoard(vals,cols){
+  // 30 greedy-random attempts, max 4 appends per attempt (limits board growth).
+  const maxSteps=vals.length*4;
+  for(let a=0;a<30;a++){
+    let b=vals.slice(), appends=0, active=vals.length;
+    for(let s=0;s<maxSteps;s++){
+      if(active===0) return true;
+      const pairs=samplePairs(b,cols,6);
+      if(!pairs.length){
+        if(appends>=4) break;
+        const live=b.filter(v=>v); b=[...b,...live]; active=live.length; appends++;
+      } else {
+        const [x,y]=pairs[Math.trunc(Math.random()*pairs.length)];
+        b=b.slice(); b[x]=0; b[y]=0; active-=2;
+      }
+    }
+  }
+  return false;
+}
+self.onmessage=function(e){
+  const{levelId,rows,cols,count}=e.data;
+  const boards=[]; let tried=0;
+  while(boards.length<count&&tried<300){
+    tried++;
+    const vals=Array.from({length:rows*cols},()=>Math.trunc(Math.random()*9)+1);
+    if(samplePairs(vals,cols,2).length<2) continue; // must have a playable start
+    if(tryBoard(vals,cols)) boards.push(vals);
+  }
+  self.postMessage({levelId,boards});
+};
+`;
+
+let genWorker = null;
+function ensureWorker() {
+  if (genWorker) return;
+  const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+  genWorker = new Worker(URL.createObjectURL(blob));
+  genWorker.onmessage = e => {
+    const { levelId, boards } = e.data;
+    boardPool[levelId].push(...boards);
+    updatePoolBadges();
+    requestMoreBoards(); // keep topping up
+  };
 }
 
+function requestMoreBoards() {
+  ensureWorker();
+  LEVELS.forEach(lv => {
+    const needed = POOL_TARGET - boardPool[lv.id].length;
+    if (needed > 0) {
+      genWorker.postMessage({ levelId: lv.id, rows: lv.rows, cols: COLS, count: needed });
+    }
+  });
+}
 
-const BOARD_SIZES = [
-  { rows: 2, cols:  8, label: 'Mini',   cells: 16 },
-  { rows: 4, cols:  8, label: 'Easy',   cells: 32 },
-  { rows: 4, cols: 10, label: 'Normal', cells: 40 },
-  { rows: 6, cols: 10, label: 'Hard',   cells: 60 },
-  { rows: 8, cols: 10, label: 'Expert', cells: 80 },
-];
+function updatePoolBadges() {
+  LEVELS.forEach(lv => {
+    const btn = document.querySelector(`.var-btn[data-level="${lv.id}"]`);
+    if (!btn) return;
+    const badge = btn.querySelector('.pool-badge');
+    const n = boardPool[lv.id].length;
+    badge.textContent = n > 0 ? '✓' : '…';
+    badge.style.color = n > 0 ? '#4f8' : '#fa0';
+    btn.disabled = false; // always allow click; startGame handles empty pool
+  });
+}
 
 function isValidPair(a, b) {
   return a === b || a + b === 10;
@@ -671,7 +770,7 @@ const ngOverlay = document.getElementById('ng-overlay');
 
 function openNewGame() {
   ngOverlay.classList.add('open');
-  document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
+  updatePoolBadges();
 }
 function closeNewGame() { ngOverlay.classList.remove('open'); }
 
@@ -679,9 +778,16 @@ document.getElementById('btn-new').addEventListener('click', openNewGame);
 
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    const rows = parseInt(btn.dataset.rows, 10);
+    const levelId = btn.dataset.level;
+    const lv = LEVELS.find(l => l.id === levelId);
+    let vals = boardPool[levelId].pop();
+    if (!vals) {
+      // Pool empty — fall back to cycling sequence so the game never blocks
+      vals = Array.from({length: lv.rows * COLS}, (_, i) => (i % 9) + 1);
+    }
+    requestMoreBoards(); // replenish what we just used
     closeNewGame();
-    startGame(classicBoard(rows), CLASSIC_COLS);
+    startGame(vals, COLS);
   });
 });
 
@@ -724,7 +830,7 @@ document.getElementById('btn-easy').addEventListener('click', () => {
 // BOOT
 // ═══════════════════════════════════════════════════════════
 
-// Open New Game modal on first load
+requestMoreBoards(); // start filling pool immediately
 openNewGame();
 </script>
 </body>
