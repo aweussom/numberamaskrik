@@ -296,47 +296,63 @@ function isAdjacent(cells,w,i,j){
   }
   return false;
 }
-// Returns up to maxN pairs — stops early so O(n) not O(n²) for large boards.
-function samplePairs(cells,w,maxN){
+function findPairs(cells,w){
   const p=[];
-  for(let i=0;i<cells.length&&p.length<maxN;i++){
+  for(let i=0;i<cells.length;i++){
     if(!cells[i]) continue;
     for(let j=i+1;j<cells.length;j++){
       if(!cells[j]) continue;
-      if(isValidPair(cells[i],cells[j])&&isAdjacent(cells,w,i,j)){
-        p.push([i,j]); break; // one per i is plenty for random diversity
-      }
+      if(isValidPair(cells[i],cells[j])&&isAdjacent(cells,w,i,j)) p.push([i,j]);
     }
   }
   return p;
 }
-function tryBoard(vals,cols){
-  // 30 greedy-random attempts, max 4 appends per attempt (limits board growth).
-  const maxSteps=vals.length*4;
-  for(let a=0;a<30;a++){
-    let b=vals.slice(), appends=0, active=vals.length;
-    for(let s=0;s<maxSteps;s++){
-      if(active===0) return true;
-      const pairs=samplePairs(b,cols,6);
+// Generate a board with guaranteed even parity for every complement group.
+// Every cell is part of a generated pair (equal or sum-to-10), then shuffled.
+function genBoard(rows,cols){
+  const n=rows*cols, vals=[];
+  for(let i=0;i<n/2;i++){
+    const d=Math.trunc(Math.random()*9)+1;
+    const partner=(d===5||Math.random()<0.5)?d:(10-d);
+    vals.push(d,partner);
+  }
+  for(let i=vals.length-1;i>0;i--){
+    const j=Math.trunc(Math.random()*(i+1));
+    const t=vals[i]; vals[i]=vals[j]; vals[j]=t;
+  }
+  return vals;
+}
+function tryBoard(vals,cols,minWins){
+  // Greedy-random: 100 attempts with full findPairs.
+  // Board passes if >= minWins attempts clear it (ensures multiple solution paths).
+  let wins=0;
+  for(let a=0;a<100;a++){
+    let b=vals.slice(), appends=0;
+    for(let s=0;s<600;s++){
+      let active=0; for(let k=0;k<b.length;k++) if(b[k]) active++;
+      if(active===0){wins++;break;}
+      const pairs=findPairs(b,cols);
       if(!pairs.length){
-        if(appends>=4) break;
-        const live=b.filter(v=>v); b=[...b,...live]; active=live.length*2; appends++;
+        if(appends>=3) break;
+        const live=b.filter(v=>v); b=[...b,...live]; appends++;
       } else {
         const [x,y]=pairs[Math.trunc(Math.random()*pairs.length)];
-        b=b.slice(); b[x]=0; b[y]=0; active-=2;
+        b[x]=0; b[y]=0;
       }
     }
+    if(wins>=minWins) return true;
   }
   return false;
 }
 self.onmessage=function(e){
-  const{levelId,rows,cols,count}=e.data;
+  const{levelId,rows,cols,minWins,count}=e.data;
   const boards=[]; let tried=0;
-  while(boards.length<count&&tried<300){
+  while(boards.length<count&&tried<500){
     tried++;
-    const vals=Array.from({length:rows*cols},()=>Math.trunc(Math.random()*9)+1);
-    if(samplePairs(vals,cols,2).length<2) continue; // must have a playable start
-    if(tryBoard(vals,cols)) boards.push(vals);
+    const vals=genBoard(rows,cols);
+    const pairs=findPairs(vals,cols);
+    if(pairs.length<3) continue;
+    if(tryBoard(vals,cols,minWins)) boards.push(vals);
   }
   self.postMessage({levelId,boards});
 };
@@ -357,10 +373,12 @@ function ensureWorker() {
 
 function requestMoreBoards() {
   ensureWorker();
+  const minWinsMap = { intro: 20, standard: 8, hard: 3, expert: 2 };
   LEVELS.forEach(lv => {
     const needed = POOL_TARGET - boardPool[lv.id].length;
     if (needed > 0) {
-      genWorker.postMessage({ levelId: lv.id, rows: lv.rows, cols: COLS, count: needed });
+      genWorker.postMessage({ levelId: lv.id, rows: lv.rows, cols: COLS,
+                              minWins: minWinsMap[lv.id], count: needed });
     }
   });
 }
