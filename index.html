@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Numberamaskrik</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 10px 40px;
+    }
+
+    header { text-align: center; margin-bottom: 14px; }
+
+    h1 {
+      font-size: 2.2rem;
+      letter-spacing: 4px;
+      background: linear-gradient(135deg, #e94560, #f5a623);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    #stats {
+      margin-top: 6px;
+      font-size: 0.82rem;
+      color: #667;
+      letter-spacing: 1px;
+    }
+    #stats .val { color: #e94560; font-weight: 700; }
+
+    #controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      padding: 8px 20px;
+      border: 2px solid #e94560;
+      background: transparent;
+      color: #e94560;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      transition: background 0.15s, color 0.15s, opacity 0.15s;
+    }
+    .btn:hover:not(:disabled) { background: #e94560; color: #fff; }
+    .btn:disabled { opacity: 0.28; cursor: not-allowed; }
+    .btn.dim { border-color: #3a4a6a; color: #6a7a9a; }
+    .btn.dim:hover:not(:disabled) { background: #3a4a6a; color: #ccc; border-color: #3a4a6a; }
+
+    #board-wrap { overflow-x: auto; max-width: 100%; }
+
+    #board {
+      display: inline-grid;
+      gap: 4px;
+      padding: 10px;
+      background: #16213e;
+      border-radius: 14px;
+      border: 2px solid #1e2d5a;
+    }
+
+    .cell {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      font-weight: 700;
+      border-radius: 9px;
+      border: 2px solid #253558;
+      background: #1a2845;
+      color: #b0c4e8;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: background 0.1s, border-color 0.1s, transform 0.1s;
+      position: relative;
+    }
+    .cell:hover:not(.empty) { border-color: #4e70cc; background: #1e3060; }
+    .cell.empty  { background: transparent; border-color: transparent; cursor: default; }
+    .cell.selected {
+      background: #e94560; border-color: #e94560;
+      color: #fff; transform: scale(1.12); z-index: 2;
+    }
+    .cell.drag-src {
+      background: #c73050; border-color: #e94560;
+      color: #fff; opacity: 0.85;
+    }
+    .cell.drag-tgt {
+      background: #e08010; border-color: #f5a623;
+      color: #fff; transform: scale(1.1); z-index: 2;
+    }
+    .cell.animating {
+      animation: match-pop 0.33s forwards;
+      pointer-events: none;
+    }
+    .cell.bad-flash { animation: bad-flash 0.35s; }
+
+    @keyframes match-pop {
+      0%   { transform: scale(1);   opacity: 1; background: #1a2845; }
+      45%  { transform: scale(1.4); opacity: 0.9; background: #4caf50; border-color: #4caf50; }
+      100% { transform: scale(0);   opacity: 0; }
+    }
+    @keyframes bad-flash {
+      0%,100% { background: #1a2845; border-color: #253558; }
+      40%     { background: #5a0010; border-color: #c0002a; }
+    }
+
+    /* ── Overlay / Modal ── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center; z-index: 100;
+    }
+    .overlay.open { display: flex; }
+
+    .modal {
+      background: #16213e;
+      border: 2px solid #e94560;
+      border-radius: 16px;
+      padding: 30px 26px;
+      width: min(430px, 93vw);
+      text-align: center;
+    }
+    .modal h2 { color: #e94560; font-size: 1.5rem; margin-bottom: 8px; }
+    .modal .sub { color: #667; font-size: 0.8rem; margin-bottom: 20px; line-height: 1.6; }
+
+    .var-btn {
+      display: block; width: 100%; margin: 7px 0;
+      padding: 13px 16px; text-align: left;
+      border: 2px solid #253558; background: #1a2845;
+      color: #b0c4e8; border-radius: 10px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .var-btn:hover:not(:disabled) { border-color: #e94560; background: #1e306a; color: #fff; }
+    .var-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .var-btn .vt { font-weight: 700; font-size: 0.97rem; display: block; }
+    .var-btn .vd { font-size: 0.76rem; color: #556; margin-top: 2px; display: block; }
+    .var-btn:hover:not(:disabled) .vd { color: #998; }
+
+    #gen-status { margin-top: 16px; color: #aaa; font-size: 0.88rem; display: none; }
+    #gen-attempt { font-size: 0.75rem; color: #556; margin-top: 4px; }
+
+    /* ── Win overlay ── */
+    #win-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.82); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center; z-index: 200;
+    }
+    #win-overlay.open { display: flex; }
+    #win-box {
+      background: #16213e; border: 2px solid #4caf50;
+      border-radius: 16px; padding: 40px 32px; text-align: center;
+    }
+    #win-box h2 { font-size: 2.4rem; color: #4caf50; margin-bottom: 10px; }
+    #win-box p  { color: #aaa; margin: 4px 0; }
+
+    .hint { font-size: 0.75rem; color: #334; margin-top: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>NUMBERAMASKRIK</h1>
+  <div id="stats">
+    Remaining: <span class="val" id="st-rem">0</span>
+    &nbsp;·&nbsp; Moves: <span class="val" id="st-moves">0</span>
+    &nbsp;·&nbsp; Appends: <span class="val" id="st-app">0</span>
+  </div>
+</header>
+
+<div id="controls">
+  <button class="btn"     id="btn-new">New Game</button>
+  <button class="btn dim" id="btn-append">Append</button>
+  <button class="btn dim" id="btn-undo">Undo</button>
+</div>
+
+<div id="board-wrap">
+  <div id="board"></div>
+</div>
+
+<p class="hint">Drag (or click twice) pairs that are equal or sum to 10</p>
+
+<!-- ── New Game Modal ── -->
+<div class="overlay" id="ng-overlay">
+  <div class="modal">
+    <h2>New Game</h2>
+    <p class="sub">
+      Random variants use constructive generation + exhaustive path-replay verification:
+      a complete solution from first move to last is found before the board is shown to you.
+    </p>
+    <button class="var-btn" data-mode="classic">
+      <span class="vt">Classic</span>
+      <span class="vd">Fixed sequence 1–9 × 2 rows · always solvable</span>
+    </button>
+    <button class="var-btn" data-mode="r2">
+      <span class="vt">Random — Easy</span>
+      <span class="vd">2 rows × 9 columns (18 cells) · solution verified before start</span>
+    </button>
+    <button class="var-btn" data-mode="r4">
+      <span class="vt">Random — Normal</span>
+      <span class="vd">4 rows × 9 columns (36 cells) · solution verified before start</span>
+    </button>
+    <button class="var-btn" data-mode="r6">
+      <span class="vt">Random — Hard</span>
+      <span class="vd">6 rows × 9 columns (54 cells) · solution verified before start</span>
+    </button>
+    <div id="gen-status">
+      🔍 Searching for a solvable board…
+      <div id="gen-attempt"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Win Overlay ── -->
+<div id="win-overlay">
+  <div id="win-box">
+    <h2>🎉 You Win!</h2>
+    <p id="win-moves"></p>
+    <p id="win-app"></p>
+    <button class="btn" id="btn-win-new" style="margin-top:22px">Play Again</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+// SHARED GAME LOGIC  (also stringified into the solver worker)
+// ═══════════════════════════════════════════════════════════
+
+const COLS = 9;
+const CLASSIC = [1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9];
+
+function isValidPair(a, b) {
+  return a === b || a + b === 10;
+}
+
+// cells: number[], 0 = cleared.  Returns true if idxA and idxB are adjacent.
+function isAdjacent(cells, width, idxA, idxB) {
+  if (idxA === idxB) return false;
+  const lo = Math.min(idxA, idxB);
+  const hi = Math.max(idxA, idxB);
+
+  // ① Flat / row-wrap adjacency: no active cells between lo+1 … hi-1
+  let flatOk = true;
+  for (let k = lo + 1; k < hi; k++) {
+    if (cells[k] !== 0) { flatOk = false; break; }
+  }
+  if (flatOk) return true;
+
+  // ② Vertical adjacency: same column, no active cells in that column between the two rows
+  if (idxA % width === idxB % width) {
+    const col    = idxA % width;
+    const loRow  = Math.floor(lo / width);
+    const hiRow  = Math.floor(hi / width);
+    for (let r = loRow + 1; r < hiRow; r++) {
+      if (cells[r * width + col] !== 0) return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function findPairs(cells, width) {
+  const pairs = [];
+  for (let i = 0; i < cells.length; i++) {
+    if (!cells[i]) continue;
+    for (let j = i + 1; j < cells.length; j++) {
+      if (!cells[j]) continue;
+      if (isValidPair(cells[i], cells[j]) && isAdjacent(cells, width, i, j))
+        pairs.push([i, j]);
+    }
+  }
+  return pairs;
+}
+
+function hasMoves(cells, width) {
+  for (let i = 0; i < cells.length; i++) {
+    if (!cells[i]) continue;
+    for (let j = i + 1; j < cells.length; j++) {
+      if (!cells[j]) continue;
+      if (isValidPair(cells[i], cells[j]) && isAdjacent(cells, width, i, j)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Exhaustive DFS solver with memoisation + dead-cell pruning.
+ * Returns true (solvable), false (not solvable), or null (timed out).
+ */
+function solve(initVals, width, maxMs) {
+  const deadline = performance.now() + maxMs;
+  const n        = initVals.length;
+  const visited  = new Set();
+  let   ticks    = 0;
+
+  // Safe dead-cell check: a cell is truly dead only when NO other active cell
+  // anywhere has a matching value.  Strict adjacency is wrong here — clearing
+  // intermediate cells can always unlock a distant partner.
+  function deadCell(cells) {
+    for (let i = 0; i < n; i++) {
+      if (!cells[i]) continue;
+      let ok = false;
+      for (let j = 0; j < n && !ok; j++) {
+        if (j !== i && cells[j] && isValidPair(cells[i], cells[j])) ok = true;
+      }
+      if (!ok) return true;
+    }
+    return false;
+  }
+
+  function dfs(cells) {
+    if ((++ticks & 4095) === 0 && performance.now() > deadline) return null;
+
+    const key = cells.join(',');
+    if (visited.has(key)) return false;
+    visited.add(key);
+
+    if (cells.every(v => v === 0)) return true;
+    if (deadCell(cells)) return false;
+
+    for (const [i, j] of findPairs(cells, width)) {
+      const next = cells.slice();
+      next[i] = 0; next[j] = 0;
+      const r = dfs(next);
+      if (r === true)  return true;
+      if (r === null)  return null;
+    }
+    return false;
+  }
+
+  return dfs(initVals.slice());
+}
+
+// ═══════════════════════════════════════════════════════════
+// INLINE SOLVER WEB WORKER
+// ═══════════════════════════════════════════════════════════
+
+// Constructive board generation using a snake-path Hamiltonian approach.
+//
+// Key insight: walk all cells in a "snake" pattern (boustrophedon), then pair up
+// consecutive cells along the path.  Every consecutive pair on the snake is a
+// DIRECT neighbor in the grid (horizontal, row-wrap, or same-column adjacent-row),
+// so isAdjacent always returns true for them regardless of what other cells are
+// placed — no stuck states, no retries needed.
+//
+// We randomly choose between a row-snake and a column-snake for positional variety,
+// shuffle the placement ORDER of pairs, and assign random valid pair values, giving
+// an enormous space of distinct boards.  A path-replay sanity check confirms the
+// complete solution in O(n²) time.
+function generateByConstruction(rows, cols) {
+  const n = rows * cols;
+  const PAIR_VALUES = [
+    [1,9],[9,1],[2,8],[8,2],[3,7],[7,3],[4,6],[6,4],[5,5],
+    [1,1],[2,2],[3,3],[4,4],[6,6],[7,7],[8,8],[9,9],
+  ];
+
+  // Build a Hamiltonian snake path through the grid.
+  // Randomly choose row-snake vs column-snake and starting direction.
+  const snake = [];
+  if (Math.random() < 0.5) {
+    // Row-snake: traverse rows, alternating left↔right.
+    const startLeft = Math.random() < 0.5;
+    for (let row = 0; row < rows; row++) {
+      const goLeft = (row % 2 === 0) === startLeft;
+      if (goLeft) {
+        for (let col = 0; col < cols; col++) snake.push(row * cols + col);
+      } else {
+        for (let col = cols - 1; col >= 0; col--) snake.push(row * cols + col);
+      }
+    }
+  } else {
+    // Column-snake: traverse columns, alternating top↔bottom.
+    const startDown = Math.random() < 0.5;
+    for (let col = 0; col < cols; col++) {
+      const goDown = (col % 2 === 0) === startDown;
+      if (goDown) {
+        for (let row = 0; row < rows; row++) snake.push(row * cols + col);
+      } else {
+        for (let row = rows - 1; row >= 0; row--) snake.push(row * cols + col);
+      }
+    }
+  }
+
+  // Group consecutive snake cells into pairs.
+  // Each pair is guaranteed to be a direct neighbor (always isAdjacent = true).
+  const pairs = [];
+  for (let k = 0; k < n; k += 2) pairs.push([snake[k], snake[k + 1]]);
+
+  // Shuffle pair placement order for board variety.
+  for (let i = pairs.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    const tmp = pairs[i]; pairs[i] = pairs[j]; pairs[j] = tmp;
+  }
+
+  // Assign random valid values to each pair and record the construction path.
+  const cells = new Array(n).fill(0);
+  const path  = [];
+  for (const [pi, pj] of pairs) {
+    const [va, vb] = PAIR_VALUES[(Math.random() * PAIR_VALUES.length) | 0];
+    path.push([pi, pj]);
+    cells[pi] = va;
+    cells[pj] = vb;
+  }
+
+  // Path-replay sanity check: remove in reverse construction order.
+  // For direct-neighbor pairs this always passes — included as a safety net.
+  const ver = cells.slice();
+  for (let k = path.length - 1; k >= 0; k--) {
+    const [pi, pj] = path[k];
+    if (!isAdjacent(ver, cols, pi, pj) || !isValidPair(ver[pi], ver[pj])) return null;
+    ver[pi] = 0; ver[pj] = 0;
+  }
+  return cells;
+}
+
+function buildWorker() {
+  // Embed the shared pure functions by source so the worker is fully self-contained.
+  const src = [isValidPair, isAdjacent, generateByConstruction]
+    .map(fn => fn.toString()).join('\n\n');
+
+  const code = `
+'use strict';
+${src}
+
+self.onmessage = function(e) {
+  const { rows, cols } = e.data;
+  // Construction + path-replay verification is O(n³) and nearly instant.
+  const vals = generateByConstruction(rows, cols);
+  if (vals) self.postMessage({ type: 'found', vals });
+  else      self.postMessage({ type: 'failed' });
+};
+`;
+  const blob = new Blob([code], { type: 'text/javascript' });
+  return new Worker(URL.createObjectURL(blob));
+}
+
+let activeWorker = null;
+
+function generateRandom(rows, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
+    activeWorker = buildWorker();
+
+    onProgress(1); // show the "generating" message immediately
+    activeWorker.onmessage = e => {
+      const { type, vals } = e.data;
+      activeWorker.terminate(); activeWorker = null;
+      if (type === 'found') resolve(vals);
+      else reject(new Error('Board generation failed. Please try again.'));
+    };
+    activeWorker.onerror = err => {
+      activeWorker.terminate(); activeWorker = null;
+      reject(err);
+    };
+    activeWorker.postMessage({ rows, cols: COLS });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// GAME STATE
+// ═══════════════════════════════════════════════════════════
+
+const G = {
+  cells:       [],   // number[] — 0 = cleared
+  width:       COLS,
+  moveCount:   0,
+  appendCount: 0,
+  history:     [],   // undo stack: snapshots of {cells, moveCount, appendCount}
+  animSet:     {},   // idx → original value, for cells mid-animation
+};
+
+function startGame(vals) {
+  G.cells       = vals.slice();
+  G.width       = COLS;
+  G.moveCount   = 0;
+  G.appendCount = 0;
+  G.history     = [];
+  G.animSet     = {};
+  UI.selected   = -1;
+  UI.dragSrc    = -1;
+  UI.dragTgt    = -1;
+  UI.dragging   = false;
+  render();
+  updateStats();
+}
+
+function snapshot() {
+  G.history.push({ cells: G.cells.slice(), moveCount: G.moveCount, appendCount: G.appendCount });
+  if (G.history.length > 50) G.history.shift();
+}
+
+function doUndo() {
+  if (!G.history.length) return;
+  const h = G.history.pop();
+  G.cells       = h.cells;
+  G.moveCount   = h.moveCount;
+  G.appendCount = h.appendCount;
+  G.animSet     = {};
+  UI.selected   = -1;
+  render(); updateStats();
+}
+
+function doAppend() {
+  snapshot();
+  const active = G.cells.filter(v => v !== 0);
+  G.cells = [...G.cells, ...active];
+  G.appendCount++;
+  render(); updateStats();
+}
+
+function tryMatch(a, b) {
+  if (a === b) return false;
+  const cv = G.cells;
+  if (!cv[a] || !cv[b]) return false;
+  if (!isValidPair(cv[a], cv[b])) return false;
+  if (!isAdjacent(cv, G.width, a, b)) return false;
+
+  snapshot();
+  G.animSet[a] = cv[a];
+  G.animSet[b] = cv[b];
+  cv[a] = 0; cv[b] = 0;
+  G.moveCount++;
+  updateStats();
+  render();   // render now; animating cells rendered with special class
+
+  setTimeout(() => {
+    delete G.animSet[a];
+    delete G.animSet[b];
+    render();
+    if (G.cells.every(v => v === 0)) showWin();
+  }, 340);
+
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI STATE + RENDERING
+// ═══════════════════════════════════════════════════════════
+
+const UI = { selected: -1, dragging: false, dragSrc: -1, dragTgt: -1 };
+
+const boardEl = document.getElementById('board');
+
+function render() {
+  const cells  = G.cells;
+  const width  = G.width;
+  const n      = cells.length;
+  const total  = Math.ceil(n / width) * width;
+
+  boardEl.style.gridTemplateColumns = `repeat(${width}, 50px)`;
+
+  // Grow DOM
+  while (boardEl.children.length < total) {
+    const div = document.createElement('div');
+    div.className = 'cell empty';
+    const idx = boardEl.children.length;
+    div.dataset.idx = idx;
+    div.addEventListener('mousedown',  e => onDown(e, +div.dataset.idx));
+    div.addEventListener('mouseenter', ()  => onEnter(+div.dataset.idx));
+    div.addEventListener('mouseup',    e => onUp(e, +div.dataset.idx));
+    div.addEventListener('touchstart', e => { e.preventDefault(); onDown(e, +div.dataset.idx); }, { passive: false });
+    boardEl.appendChild(div);
+  }
+  // Shrink DOM (shouldn't happen in normal play, but be safe)
+  while (boardEl.children.length > total) boardEl.removeChild(boardEl.lastChild);
+
+  for (let i = 0; i < total; i++) {
+    const div = boardEl.children[i];
+    div.dataset.idx = i; // keep in sync after append
+
+    // Mid-animation cell: leave CSS animation running, just update idx
+    if (G.animSet[i] !== undefined) {
+      if (!div.classList.contains('animating')) {
+        div.textContent = G.animSet[i];
+        div.className   = 'cell animating';
+      }
+      continue;
+    }
+
+    const v = i < n ? cells[i] : 0;
+    if (!v) {
+      div.textContent = '';
+      div.className   = 'cell empty';
+    } else {
+      div.textContent = v;
+      let cls = 'cell';
+      if (UI.dragging) {
+        if (i === UI.dragSrc) cls += ' drag-src';
+        else if (i === UI.dragTgt) cls += ' drag-tgt';
+      } else {
+        if (i === UI.selected) cls += ' selected';
+      }
+      div.className = cls;
+    }
+  }
+
+  // Button states
+  const movesLeft = hasMoves(cells, width);
+  document.getElementById('btn-append').disabled = movesLeft;
+  document.getElementById('btn-undo').disabled   = G.history.length === 0;
+}
+
+function updateStats() {
+  document.getElementById('st-rem').textContent   = G.cells.filter(v => v !== 0).length;
+  document.getElementById('st-moves').textContent = G.moveCount;
+  document.getElementById('st-app').textContent   = G.appendCount;
+}
+
+// ═══════════════════════════════════════════════════════════
+// INPUT HANDLING
+// ═══════════════════════════════════════════════════════════
+
+function onDown(e, idx) {
+  e.preventDefault();
+  if (!G.cells[idx]) return;
+  UI.dragging = true;
+  UI.dragSrc  = idx;
+  UI.dragTgt  = -1;
+  render();
+}
+
+function onEnter(idx) {
+  if (!UI.dragging || idx === UI.dragSrc) return;
+  if (UI.dragTgt === idx) return;
+  UI.dragTgt = G.cells[idx] ? idx : -1;
+  render();
+}
+
+function onUp(e, idx) {
+  if (!UI.dragging) return;
+  const src = UI.dragSrc;
+  UI.dragging = false;
+  UI.dragSrc  = -1;
+  UI.dragTgt  = -1;
+
+  if (src === idx) {
+    // Treat as click: toggle selection or attempt match
+    if (UI.selected === idx) {
+      UI.selected = -1;
+    } else if (UI.selected !== -1) {
+      const prev = UI.selected;
+      UI.selected = -1;
+      if (!tryMatch(prev, idx)) flashBad(prev, idx);
+    } else {
+      UI.selected = idx;
+    }
+    render();
+    return;
+  }
+
+  // Drag ended on a different cell
+  if (G.cells[idx]) {
+    UI.selected = -1;
+    if (!tryMatch(src, idx)) flashBad(src, idx);
+  }
+  render();
+}
+
+// Cancel drag when pointer leaves the board
+boardEl.addEventListener('mouseleave', () => {
+  if (!UI.dragging) return;
+  UI.selected = UI.dragSrc; // convert to click-selection
+  UI.dragging = false;
+  UI.dragSrc  = -1;
+  UI.dragTgt  = -1;
+  render();
+});
+
+// Touch move: track finger position to update drag target
+document.addEventListener('touchmove', e => {
+  if (!UI.dragging) return;
+  e.preventDefault();
+  const t   = e.touches[0];
+  const el  = document.elementFromPoint(t.clientX, t.clientY);
+  const idx = el && el.dataset.idx !== undefined ? +el.dataset.idx : -1;
+  if (idx >= 0 && idx !== UI.dragSrc && G.cells[idx]) {
+    if (UI.dragTgt !== idx) { UI.dragTgt = idx; render(); }
+  } else {
+    if (UI.dragTgt !== -1) { UI.dragTgt = -1; render(); }
+  }
+}, { passive: false });
+
+// Touch end
+document.addEventListener('touchend', e => {
+  if (!UI.dragging) return;
+  e.preventDefault();
+  const t   = e.changedTouches[0];
+  const el  = document.elementFromPoint(t.clientX, t.clientY);
+  const idx = el && el.dataset.idx !== undefined ? +el.dataset.idx : -1;
+  if (idx >= 0) onUp(e, idx);
+  else { UI.dragging = false; UI.dragSrc = -1; UI.dragTgt = -1; render(); }
+}, { passive: false });
+
+function flashBad(...indices) {
+  for (const idx of indices) {
+    const el = boardEl.querySelector(`[data-idx="${idx}"]`);
+    if (!el) continue;
+    el.classList.remove('bad-flash');
+    void el.offsetWidth; // force reflow
+    el.classList.add('bad-flash');
+    setTimeout(() => el.classList.remove('bad-flash'), 380);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// NEW-GAME MODAL
+// ═══════════════════════════════════════════════════════════
+
+const ngOverlay  = document.getElementById('ng-overlay');
+const genStatus  = document.getElementById('gen-status');
+const genAttempt = document.getElementById('gen-attempt');
+
+function openNewGame() {
+  ngOverlay.classList.add('open');
+  genStatus.style.display = 'none';
+  genAttempt.textContent  = '';
+  document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
+}
+function closeNewGame() { ngOverlay.classList.remove('open'); }
+
+document.getElementById('btn-new').addEventListener('click', openNewGame);
+
+document.querySelectorAll('.var-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const mode = btn.dataset.mode;
+
+    if (mode === 'classic') {
+      closeNewGame();
+      startGame(CLASSIC);
+      return;
+    }
+
+    const rows = parseInt(mode.slice(1), 10);
+
+    // Lock UI, show progress
+    document.querySelectorAll('.var-btn').forEach(b => { b.disabled = true; });
+    genStatus.style.display = 'block';
+    genAttempt.textContent  = '';
+
+    try {
+      const vals = await generateRandom(rows, att => {
+        genAttempt.textContent = `Attempt ${att}…`;
+      });
+      closeNewGame();
+      startGame(vals);
+    } catch (err) {
+      alert('Could not find a solvable board. Please try again or choose a smaller variant.');
+      document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
+      genStatus.style.display = 'none';
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// WIN OVERLAY
+// ═══════════════════════════════════════════════════════════
+
+function showWin() {
+  document.getElementById('win-moves').textContent = `Moves: ${G.moveCount}`;
+  document.getElementById('win-app').textContent   = `Appends used: ${G.appendCount}`;
+  document.getElementById('win-overlay').classList.add('open');
+}
+
+document.getElementById('btn-win-new').addEventListener('click', () => {
+  document.getElementById('win-overlay').classList.remove('open');
+  openNewGame();
+});
+
+// ═══════════════════════════════════════════════════════════
+// CONTROL BUTTONS
+// ═══════════════════════════════════════════════════════════
+
+document.getElementById('btn-append').addEventListener('click', () => {
+  if (!hasMoves(G.cells, G.width)) doAppend();
+});
+document.getElementById('btn-undo').addEventListener('click', doUndo);
+
+// ═══════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════
+
+startGame(CLASSIC);
+</script>
+</body>
+</html>
