@@ -184,6 +184,14 @@
       0%,100% { box-shadow: 0 0 4px 0 rgba(100,220,255,0.3); }
       50%      { box-shadow: 0 0 14px 4px rgba(100,220,255,0.7); background: #1e3a50; }
     }
+    .btn.append-pulse {
+      animation: append-glow 1s ease-in-out infinite;
+      border-color: #f5a623 !important; color: #fff !important;
+    }
+    @keyframes append-glow {
+      0%,100% { box-shadow: 0 0 4px 0 rgba(245,166,35,0.4); }
+      50%     { box-shadow: 0 0 16px 5px rgba(245,166,35,0.8); background: #3a2a10; }
+    }
 
     #hint-svg {
       position: absolute; top: 0; left: 0;
@@ -214,7 +222,7 @@
   <svg id="hint-svg"></svg>
 </div>
 
-<p class="hint">Drag (or click twice) pairs that are equal or sum to 10</p>
+<p class="hint" id="hint-text">Drag (or click twice) pairs that are equal or sum to 10</p>
 
 <!-- ── New Game Modal ── -->
 <div class="overlay" id="ng-overlay">
@@ -529,6 +537,7 @@ function tryMatch(a, b) {
     render();
     resetIdleTimer();
     if (G.cells.every(v => v === 0)) showWin();
+    else if (!hasMoves(G.cells, G.width)) highlightAppend();
   }, 340);
   G.animTimeouts.add(tid);
 
@@ -828,8 +837,20 @@ document.getElementById('btn-win-new').addEventListener('click', () => {
 // CONTROL BUTTONS
 // ═══════════════════════════════════════════════════════════
 
+function highlightAppend() {
+  const btn = document.getElementById('btn-append');
+  btn.classList.add('append-pulse');
+  // Also show hint text
+  document.getElementById('hint-text').textContent = 'No moves left — tap Append!';
+}
+
 document.getElementById('btn-append').addEventListener('click', () => {
-  if (!hasMoves(G.cells, G.width)) { doAppend(); resetIdleTimer(); }
+  if (!hasMoves(G.cells, G.width)) {
+    document.getElementById('btn-append').classList.remove('append-pulse');
+    document.getElementById('hint-text').textContent =
+      'Drag (or click twice) pairs that are equal or sum to 10';
+    doAppend(); resetIdleTimer();
+  }
 });
 document.getElementById('btn-undo').addEventListener('click', () => { doUndo(); resetIdleTimer(); });
 
