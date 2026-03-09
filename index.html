@@ -353,6 +353,41 @@ function tryBoard(vals,cols,minWins){
   return false;
 }
 self.onmessage=function(e){
+  if(e.data.type==='compute-append'){
+    const{board,width}=e.data;
+    const active=board.filter(v=>v!==0);
+    let best=[...board,...active], solved=false;
+    const deadline=Date.now()+8000; // 8-second budget
+    // Quick solvability check (30 greedy attempts, faster than full tryBoard)
+    function quickTry(vals,w){
+      for(let a=0;a<30;a++){
+        let b=vals.slice(),ap=0;
+        for(let s=0;s<400;s++){
+          let act=0;for(let k=0;k<b.length;k++)if(b[k])act++;
+          if(act===0)return true;
+          const ps=findPairs(b,w);
+          if(!ps.length){if(ap>=2)break;const lv=b.filter(v=>v);for(let k=0;k<lv.length;k++)b.push(lv[k]);ap++;}
+          else{const[x,y]=ps[Math.trunc(Math.random()*ps.length)];b[x]=0;b[y]=0;}
+        }
+      }
+      return false;
+    }
+    // Standard order first
+    if(quickTry(best,width)){solved=true;}
+    if(!solved){
+      for(let i=0;i<500&&Date.now()<deadline;i++){
+        const sh=active.slice();
+        for(let j=sh.length-1;j>0;j--){
+          const k=Math.trunc(Math.random()*(j+1));
+          const t=sh[j];sh[j]=sh[k];sh[k]=t;
+        }
+        const cand=[...board,...sh];
+        if(quickTry(cand,width)){best=cand;solved=true;break;}
+      }
+    }
+    self.postMessage({type:'append-result',cells:best,solved});
+    return;
+  }
   const{levelId,rows,cols,minWins,count}=e.data;
   const boards=[]; let tried=0;
   while(boards.length<count&&tried<500){
@@ -366,17 +401,43 @@ self.onmessage=function(e){
 };
 `;
 
+const workerBlobUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'application/javascript' }));
+
 let genWorker = null;
 function ensureWorker() {
   if (genWorker) return;
-  const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-  genWorker = new Worker(URL.createObjectURL(blob));
+  genWorker = new Worker(workerBlobUrl);
   genWorker.onmessage = e => {
+    if (e.data.levelId === undefined) return; // ignore append-result if any
     const { levelId, boards } = e.data;
     boardPool[levelId].push(...boards);
     updatePoolBadges();
     requestMoreBoards(); // keep topping up
   };
+}
+
+// Dedicated append worker — separate from board-gen so no queue delay
+let appendWorker = null;
+let appendResolve = null;  // resolve callback for the pending append promise
+
+function ensureAppendWorker() {
+  if (appendWorker) return;
+  appendWorker = new Worker(workerBlobUrl);
+  appendWorker.onmessage = e => {
+    if (e.data.type === 'append-result' && appendResolve) {
+      appendResolve(e.data.cells);
+      appendResolve = null;
+    }
+  };
+}
+
+// Start pre-computing a solvable append arrangement in the background.
+// Returns a Promise that resolves to the result cells array.
+function precomputeAppend() {
+  ensureAppendWorker();
+  const p = new Promise(resolve => { appendResolve = resolve; });
+  appendWorker.postMessage({ type: 'compute-append', board: G.cells.slice(), width: G.width });
+  return p;
 }
 
 function requestMoreBoards() {
@@ -470,6 +531,7 @@ const G = {
   history:      [],   // undo stack: snapshots of {cells, moveCount, appendCount}
   animSet:      {},   // idx → original value, for cells mid-animation
   animTimeouts: new Set(), // pending animation timeout IDs
+  appendPromise: null, // Promise for pre-computed append result (or null)
 };
 
 function startGame(vals, width) {
@@ -481,6 +543,8 @@ function startGame(vals, width) {
   G.appendCount = 0;
   G.history     = [];
   G.animSet     = {};
+  G.appendPromise = null;
+  appendResolve   = null;
   UI.selected   = -1;
   UI.dragSrc    = -1;
   UI.dragTgt    = -1;
@@ -503,19 +567,40 @@ function doUndo() {
   G.moveCount   = h.moveCount;
   G.appendCount = h.appendCount;
   G.animSet     = {};
+  G.appendPromise = null;
+  appendResolve   = null;
   UI.selected   = -1;
   render(); updateStats();
 }
 
-function doAppend() {
+async function doAppend() {
   snapshot();
+  let result;
+
+  if (G.appendPromise) {
+    // Worker is computing (or already done) — await it
+    const btn = document.getElementById('btn-append');
+    const origText = btn.textContent;
+    btn.textContent = 'Calculating…';
+    result = await G.appendPromise;
+    btn.textContent = origText;
+    G.appendPromise = null;
+  } else {
+    // Sync fallback (edge case: no pre-computation started)
+    result = computeAppendSync();
+  }
+
+  G.cells = result;
+  G.appendCount++;
+  render(); updateStats();
+}
+
+// Synchronous append computation — used as fallback only
+function computeAppendSync() {
   const active = G.cells.filter(v => v !== 0);
   const base = G.cells.slice();
-
-  // Try standard append first
   let result = [...base, ...active];
   if (!quickSolve(result, G.width)) {
-    // Shuffle the appended portion until solvable (up to 60 attempts)
     for (let i = 0; i < 60; i++) {
       const shuffled = active.slice();
       for (let j = shuffled.length - 1; j > 0; j--) {
@@ -526,10 +611,7 @@ function doAppend() {
       if (quickSolve(candidate, G.width)) { result = candidate; break; }
     }
   }
-
-  G.cells = result;
-  G.appendCount++;
-  render(); updateStats();
+  return result;
 }
 
 // Fast greedy-random solver for the main thread.
@@ -882,16 +964,18 @@ document.getElementById('btn-win-new').addEventListener('click', () => {
 function highlightAppend() {
   const btn = document.getElementById('btn-append');
   btn.classList.add('append-pulse');
-  // Also show hint text
   document.getElementById('hint-text').textContent = 'No moves left — tap Append!';
+  // Pre-compute solvable append arrangement in background worker
+  G.appendPromise = precomputeAppend();
 }
 
-document.getElementById('btn-append').addEventListener('click', () => {
+document.getElementById('btn-append').addEventListener('click', async () => {
   if (!hasMoves(G.cells, G.width)) {
+    await doAppend();
     document.getElementById('btn-append').classList.remove('append-pulse');
     document.getElementById('hint-text').textContent =
       'Drag (or click twice) pairs that are equal or sum to 10';
-    doAppend(); resetIdleTimer();
+    resetIdleTimer();
   }
 });
 document.getElementById('btn-undo').addEventListener('click', () => { doUndo(); resetIdleTimer(); });
