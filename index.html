@@ -201,27 +201,32 @@
   <div class="modal">
     <h2>New Game</h2>
     <p class="sub">
-      Random variants use constructive generation + exhaustive path-replay verification:
-      a complete solution from first move to last is found before the board is shown to you.
+      Every board is generated with a snake-path construction and verified with a
+      full path-replay proof — a complete solution is guaranteed before the board
+      is shown. All sizes use even rows × even columns.
     </p>
-    <button class="var-btn" data-mode="classic">
-      <span class="vt">Classic</span>
-      <span class="vd">Fixed sequence 1–9 × 2 rows · always solvable</span>
+    <button class="var-btn" data-mode="2x8">
+      <span class="vt">Mini</span>
+      <span class="vd">2 rows × 8 columns · 16 cells</span>
     </button>
-    <button class="var-btn" data-mode="r2">
-      <span class="vt">Random — Easy</span>
-      <span class="vd">2 rows × 9 columns (18 cells) · solution verified before start</span>
+    <button class="var-btn" data-mode="4x8">
+      <span class="vt">Easy</span>
+      <span class="vd">4 rows × 8 columns · 32 cells</span>
     </button>
-    <button class="var-btn" data-mode="r4">
-      <span class="vt">Random — Normal</span>
-      <span class="vd">4 rows × 9 columns (36 cells) · solution verified before start</span>
+    <button class="var-btn" data-mode="4x10">
+      <span class="vt">Normal</span>
+      <span class="vd">4 rows × 10 columns · 40 cells</span>
     </button>
-    <button class="var-btn" data-mode="r6">
-      <span class="vt">Random — Hard</span>
-      <span class="vd">6 rows × 9 columns (54 cells) · solution verified before start</span>
+    <button class="var-btn" data-mode="6x10">
+      <span class="vt">Hard</span>
+      <span class="vd">6 rows × 10 columns · 60 cells</span>
+    </button>
+    <button class="var-btn" data-mode="8x10">
+      <span class="vt">Expert</span>
+      <span class="vd">8 rows × 10 columns · 80 cells</span>
     </button>
     <div id="gen-status">
-      🔍 Searching for a solvable board…
+      🔍 Generating board…
       <div id="gen-attempt"></div>
     </div>
   </div>
@@ -244,8 +249,14 @@
 // SHARED GAME LOGIC  (also stringified into the solver worker)
 // ═══════════════════════════════════════════════════════════
 
-const COLS = 9;
-const CLASSIC = [1,2,3,4,5,6,7,8,9, 1,2,3,4,5,6,7,8,9];
+// Pre-defined board sizes — all even×even so rows, cols, and n are all even.
+const BOARD_SIZES = [
+  { rows: 2, cols:  8, label: 'Mini',   cells: 16 },
+  { rows: 4, cols:  8, label: 'Easy',   cells: 32 },
+  { rows: 4, cols: 10, label: 'Normal', cells: 40 },
+  { rows: 6, cols: 10, label: 'Hard',   cells: 60 },
+  { rows: 8, cols: 10, label: 'Expert', cells: 80 },
+];
 
 function isValidPair(a, b) {
   return a === b || a + b === 10;
@@ -300,54 +311,6 @@ function hasMoves(cells, width) {
     }
   }
   return false;
-}
-
-/**
- * Exhaustive DFS solver with memoisation + dead-cell pruning.
- * Returns true (solvable), false (not solvable), or null (timed out).
- */
-function solve(initVals, width, maxMs) {
-  const deadline = performance.now() + maxMs;
-  const n        = initVals.length;
-  const visited  = new Set();
-  let   ticks    = 0;
-
-  // Safe dead-cell check: a cell is truly dead only when NO other active cell
-  // anywhere has a matching value.  Strict adjacency is wrong here — clearing
-  // intermediate cells can always unlock a distant partner.
-  function deadCell(cells) {
-    for (let i = 0; i < n; i++) {
-      if (!cells[i]) continue;
-      let ok = false;
-      for (let j = 0; j < n && !ok; j++) {
-        if (j !== i && cells[j] && isValidPair(cells[i], cells[j])) ok = true;
-      }
-      if (!ok) return true;
-    }
-    return false;
-  }
-
-  function dfs(cells) {
-    if ((++ticks & 4095) === 0 && performance.now() > deadline) return null;
-
-    const key = cells.join(',');
-    if (visited.has(key)) return false;
-    visited.add(key);
-
-    if (cells.every(v => v === 0)) return true;
-    if (deadCell(cells)) return false;
-
-    for (const [i, j] of findPairs(cells, width)) {
-      const next = cells.slice();
-      next[i] = 0; next[j] = 0;
-      const r = dfs(next);
-      if (r === true)  return true;
-      if (r === null)  return null;
-    }
-    return false;
-  }
-
-  return dfs(initVals.slice());
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -455,7 +418,7 @@ self.onmessage = function(e) {
 
 let activeWorker = null;
 
-function generateRandom(rows, onProgress) {
+function generateRandom(rows, cols, onProgress) {
   return new Promise((resolve, reject) => {
     if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
     activeWorker = buildWorker();
@@ -471,7 +434,7 @@ function generateRandom(rows, onProgress) {
       activeWorker.terminate(); activeWorker = null;
       reject(err);
     };
-    activeWorker.postMessage({ rows, cols: COLS });
+    activeWorker.postMessage({ rows, cols });
   });
 }
 
@@ -480,17 +443,20 @@ function generateRandom(rows, onProgress) {
 // ═══════════════════════════════════════════════════════════
 
 const G = {
-  cells:       [],   // number[] — 0 = cleared
-  width:       COLS,
-  moveCount:   0,
-  appendCount: 0,
-  history:     [],   // undo stack: snapshots of {cells, moveCount, appendCount}
-  animSet:     {},   // idx → original value, for cells mid-animation
+  cells:        [],   // number[] — 0 = cleared
+  width:        8,
+  moveCount:    0,
+  appendCount:  0,
+  history:      [],   // undo stack: snapshots of {cells, moveCount, appendCount}
+  animSet:      {},   // idx → original value, for cells mid-animation
+  animTimeouts: new Set(), // pending animation timeout IDs
 };
 
-function startGame(vals) {
+function startGame(vals, width) {
+  for (const tid of G.animTimeouts) clearTimeout(tid);
+  G.animTimeouts.clear();
   G.cells       = vals.slice();
-  G.width       = COLS;
+  G.width       = width;
   G.moveCount   = 0;
   G.appendCount = 0;
   G.history     = [];
@@ -510,6 +476,8 @@ function snapshot() {
 
 function doUndo() {
   if (!G.history.length) return;
+  for (const tid of G.animTimeouts) clearTimeout(tid);
+  G.animTimeouts.clear();
   const h = G.history.pop();
   G.cells       = h.cells;
   G.moveCount   = h.moveCount;
@@ -542,12 +510,14 @@ function tryMatch(a, b) {
   updateStats();
   render();   // render now; animating cells rendered with special class
 
-  setTimeout(() => {
+  const tid = setTimeout(() => {
+    G.animTimeouts.delete(tid);
     delete G.animSet[a];
     delete G.animSet[b];
     render();
     if (G.cells.every(v => v === 0)) showWin();
   }, 340);
+  G.animTimeouts.add(tid);
 
   return true;
 }
@@ -741,15 +711,7 @@ document.getElementById('btn-new').addEventListener('click', openNewGame);
 
 document.querySelectorAll('.var-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
-    const mode = btn.dataset.mode;
-
-    if (mode === 'classic') {
-      closeNewGame();
-      startGame(CLASSIC);
-      return;
-    }
-
-    const rows = parseInt(mode.slice(1), 10);
+    const [rows, cols] = btn.dataset.mode.split('x').map(Number);
 
     // Lock UI, show progress
     document.querySelectorAll('.var-btn').forEach(b => { b.disabled = true; });
@@ -757,13 +719,13 @@ document.querySelectorAll('.var-btn').forEach(btn => {
     genAttempt.textContent  = '';
 
     try {
-      const vals = await generateRandom(rows, att => {
+      const vals = await generateRandom(rows, cols, att => {
         genAttempt.textContent = `Attempt ${att}…`;
       });
       closeNewGame();
-      startGame(vals);
+      startGame(vals, cols);
     } catch (err) {
-      alert('Could not find a solvable board. Please try again or choose a smaller variant.');
+      alert('Could not generate a board. Please try again.');
       document.querySelectorAll('.var-btn').forEach(b => { b.disabled = false; });
       genStatus.style.display = 'none';
     }
@@ -798,7 +760,8 @@ document.getElementById('btn-undo').addEventListener('click', doUndo);
 // BOOT
 // ═══════════════════════════════════════════════════════════
 
-startGame(CLASSIC);
+// Open New Game modal on first load
+openNewGame();
 </script>
 </body>
 </html>
